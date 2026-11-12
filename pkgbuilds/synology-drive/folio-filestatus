@@ -1,0 +1,65 @@
+#!/bin/sh
+# Says how a file or folder inside a Synology Drive task stands: up to date,
+# syncing, or not synced because the task's filter skips its type or folder.
+# Outside every task's folder, or with no client set up, it says nothing.
+db="$HOME/.SynologyDrive/data/db"
+path=${1%/}
+[ -f "$db/sys.sqlite" ] || { echo '[]'; exit 0; }
+
+query() { sqlite3 -readonly -batch -noheader -separator '|' "$1" "$2"; }
+row() { printf '[["Synology Drive", "%s"]]\n' "$1"; exit 0; }
+
+# The task whose folder holds the path.
+task= root=
+tasks=$(query "$db/sys.sqlite" "SELECT id, sync_folder FROM session_table ORDER BY id") || exit 1
+while IFS='|' read -r id folder; do
+  [ -n "$folder" ] || continue
+  case "$path/" in
+    "$folder"*) task=$id root=${folder%/} ;;
+  esac
+done <<TASKS
+$tasks
+TASKS
+[ -n "$task" ] || { echo '[]'; exit 0; }
+
+pid=$(tr -cd '0-9' <"$HOME/.SynologyDrive/daemon.pid" 2>/dev/null)
+case $(cat "/proc/${pid:-0}/comm" 2>/dev/null) in
+  cloud-drive-dae*) ;;
+  *) row "stopped" ;;
+esac
+
+# The task's filter, as Synology Drive's Selective Sync settings save it:
+# type -13 is a folder it skips, from the task's top ("/Backup"); -2 is an
+# ending it skips (".tmp"), for files only. The other types are limits the
+# client applies on its own.
+relative=${path#"$root"}
+relative=${relative:-/}
+if [ -d "$path" ]; then kind=folder; else kind=file; fi
+lower=$(printf '%s' "$relative" | tr 'A-Z' 'a-z')
+rules=$(query "$db/filter.sqlite" "
+  SELECT filter_type, filter_desc FROM filter_table
+  WHERE sess_id = $task AND filter_type IN (-13, -2)" 2>/dev/null)
+while IFS='|' read -r type rule; do
+  case "$type" in
+    -13)
+      case "$relative/" in "$rule/"*) row "not synced: $rule is excluded" ;; esac ;;
+    -2)
+      ending=$(printf '%s' "$rule" | tr 'A-Z' 'a-z')
+      if [ "$kind" = file ]; then
+        case "$lower" in *"$ending") row "not synced: $rule files are skipped" ;; esac
+      fi ;;
+  esac
+done <<RULES
+$rules
+RULES
+
+# Files the client is moving right now; for a folder, any file inside it.
+like=$(printf '%s' "$path" | sed "s/'/''/g")
+if [ "$kind" = folder ]; then
+  where="substr(path, 1, length('$like/')) = '$like/'"
+else
+  where="path = '$like'"
+fi
+moving=$(query "$db/file-status.sqlite" "SELECT count(*) FROM fstatinfo WHERE fileType = 0 AND $where" 2>/dev/null)
+[ "${moving:-0}" -gt 0 ] && row "syncing"
+row "up to date"

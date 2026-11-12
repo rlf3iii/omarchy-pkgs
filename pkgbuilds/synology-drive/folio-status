@@ -1,0 +1,56 @@
+#!/bin/sh
+# Marks each folder Synology Drive syncs in Folio's sidebar, and says when the
+# client has stopped, lost its NAS, hit an error or is syncing (up to date is
+# the normal state and says nothing). It reads the client's own databases,
+# read-only, as Synology's Nautilus extension does; there is no CLI to ask.
+db="$HOME/.SynologyDrive/data/db"
+if [ ! -f "$db/sys.sqlite" ]; then
+  echo '{}'
+  exit 0
+fi
+
+query() { sqlite3 -readonly -batch -noheader -separator '|' "$1" "$2"; }
+# A JSON string: quotes and backslashes escaped.
+quote() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+
+running=
+pid=$(tr -cd '0-9' <"$HOME/.SynologyDrive/daemon.pid" 2>/dev/null)
+case $(cat "/proc/${pid:-0}/comm" 2>/dev/null) in cloud-drive-dae*) running=1 ;; esac
+
+# One line per sync or backup task: whether its NAS is out of reach, the
+# task's error, its folder. Folders end in "/" in the database; the sidebar
+# knows them without it.
+tasks=$(query "$db/sys.sqlite" "
+  SELECT coalesce(c.status != 0 OR c.linked != 1, 1), s.error, s.sync_folder
+  FROM session_table s LEFT JOIN connection_table c ON c.id = s.conn_id
+  ORDER BY s.id") || exit 1
+
+printf '{"places": ['
+separator=
+while IFS='|' read -r offline error folder; do
+  [ -n "$folder" ] || continue
+  folder=${folder%/}
+  if [ -z "$running" ]; then
+    status=', "status": "stopped", "tone": "error"'
+  elif [ "$offline" != 0 ]; then
+    status=', "status": "not connected", "tone": "error"'
+  elif [ "${error:-0}" != 0 ]; then
+    status=', "status": "error", "tone": "error"'
+  else
+    # A file is in fstatinfo only while the client is moving it.
+    like=$(printf '%s' "$folder/" | sed "s/'/''/g")
+    moving=$(query "$db/file-status.sqlite" "
+      SELECT count(*) FROM fstatinfo
+      WHERE fileType = 0 AND substr(path, 1, length('$like')) = '$like'" 2>/dev/null)
+    if [ "${moving:-0}" -gt 0 ]; then
+      status=', "status": "syncing", "tone": "warning"'
+    else
+      status=
+    fi
+  fi
+  printf '%s{"path": %s, "icon": "synology-drive.svg"%s}' "$separator" "$(quote "$folder")" "$status"
+  separator=', '
+done <<TASKS
+$tasks
+TASKS
+printf ']}\n'

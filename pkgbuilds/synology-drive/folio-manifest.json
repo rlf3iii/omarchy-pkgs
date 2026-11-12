@@ -1,0 +1,6 @@
+{
+  "folio": 1,
+  "requires": ["sqlite3"],
+  "poll": { "command": ["./status"] },
+  "details": { "command": ["./filestatus"] }
+}

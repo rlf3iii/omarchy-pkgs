@@ -4,7 +4,7 @@
 
 pkgname=synology-drive
 pkgver=4.2.1_20062
-pkgrel=1
+pkgrel=2
 _version=${pkgver%_*}
 _build=${pkgver#*_}
 pkgdesc="Desktop client for Synology Drive Server: sync and back up files with a Synology NAS"
@@ -30,17 +30,29 @@ depends=(
   'libxcb'
   'libxkbcommon'
   'libxrender'
+  'sqlite'  # Folio plugin
 )
-optdepends=('nautilus: sync status overlays and context menu in Files')
+optdepends=('folio: sync status on the folder and in the details pane'
+            'nautilus: sync status overlays and context menu in Files')
 conflicts=('synology-drive-client' 'cloudstation-beta' 'cloudstation-3.0' 'cloudstation-drive')
 options=('!debug')
 source=("synology-drive-theme-tray"
         "synology-drive-theme-tray.path"
-        "synology-drive-theme-tray.service")
+        "synology-drive-theme-tray.service"
+        "folio-manifest.json"
+        "folio-status"
+        "folio-filestatus"
+        "folio-synology-drive.svg"
+        "folio-i18n-en.json")
 source_x86_64=("https://global.synologydownload.com/download/Utility/SynologyDriveClient/${_version}-${_build}/Ubuntu/Installer/synology-drive-client-${_build}.x86_64.deb")
 sha256sums=('47f0d813cf83af49f77d127cd824f84c7c72b8f47f70b08e196164ed260706ed'
             '8df4a1cef4d88e4e9ca8063103a35d505a489651323001d428e07225ca7920d7'
-            'ff24f342dddc258511d87158adf7cebb3824c5f8157a241f5ec0db5204f4bec5')
+            'ff24f342dddc258511d87158adf7cebb3824c5f8157a241f5ec0db5204f4bec5'
+            'b519f443c691c76dc1577051cb62ecb583065f7bcc05ea0f507e9f6eee7a89bb'
+            '7ad83cca5c308765acf9be46ca8e78fb3af5dd885981972fc86033d5093dd6e9'
+            '1928ad97788c8d77507a290dde4a84d520d32ef9dcde029bfa273d11ddfb4a46'
+            '559f3bff26de6e0dccb1eae30a89199d3c534408421dff935f3f8316e6464c77'
+            'eaa76ad1dcd9c32bcb3e2e58ac669383d45bb5c4685a6e044dae52894a60f610')
 sha256sums_x86_64=('e0b53bd8e2e666fbf080739ba2f6b93586ac7087f5de4b91bc013e8a2dfc40f5')
 
 package() {
@@ -70,6 +82,15 @@ package() {
   install -d "$pkgdir"/usr/lib/systemd/user/graphical-session.target.wants
   ln -s ../synology-drive-theme-tray.path "$pkgdir"/usr/lib/systemd/user/graphical-session.target.wants/
   ln -s ../synology-drive-theme-tray.service "$pkgdir"/usr/lib/systemd/user/graphical-session.target.wants/
+
+  # Folio plugin: Synology's mark and sync status on each synced folder, and
+  # how a file stands in the details pane, read from the client's databases.
+  local _folio="$pkgdir"/usr/share/folio/plugins/synology-drive
+  install -Dm644 folio-manifest.json "$_folio"/manifest.json
+  install -Dm755 folio-status "$_folio"/status
+  install -Dm755 folio-filestatus "$_folio"/filestatus
+  install -Dm644 folio-synology-drive.svg "$_folio"/synology-drive.svg
+  install -Dm644 folio-i18n-en.json "$_folio"/i18n/en.json
 
   install -d "$pkgdir"/usr/share/licenses/$pkgname
   ln -s /opt/Synology/SynologyDrive/LICENSE.txt "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
